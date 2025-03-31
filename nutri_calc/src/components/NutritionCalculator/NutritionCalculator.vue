@@ -4,175 +4,190 @@ import InputNumber from 'primevue/inputnumber'
 import FloatLabel from 'primevue/floatlabel'
 import Select from 'primevue/select'
 import Button from 'primevue/button'
-import { ref, type Ref } from "vue"
+// Removed Panel import
+import Toast from 'primevue/toast'
+import { useToast } from 'primevue/usetoast'
+import { ref, type Ref, computed } from "vue"
 import { NutritionService } from "./nutritionCalcService"
-import { GenderType, type NutritionDetails } from "./models"
+// Assuming models are now potentially split or shared
+import { GenderType } from "./models" // Or from a shared models file
+import type { NutritionDetails } from "./models" // Import type from ResultsPanel models
+import ResultsPanel from './components/ResultsPanel.vue' // Import the new component
 
-const emit = defineEmits<{
-  (e: 'nutritionDetails', data: NutritionDetails): NutritionDetails
-}>()
+// --- Toast Service ---
+const toast = useToast();
 
+// --- Interfaces ---
 interface GenderDdl {
   name: string,
   code: GenderType
 }
 
+// --- Refs for Input Fields ---
 const age: Ref<number | undefined> = ref(undefined);
 const gender: Ref<GenderType | undefined> = ref(undefined);
 const weightKg: Ref<number | undefined> = ref(undefined);
 const heightCm: Ref<number | undefined> = ref(undefined);
 const wristCm: Ref<number | undefined> = ref(undefined);
-const pal: Ref<number | undefined> = ref(undefined);
-const stressFactor: Ref<number | undefined> = ref(undefined);
 const activityFactor: Ref<number | undefined> = ref(undefined);
+const stressFactor: Ref<number | undefined> = ref(undefined);
 
+// --- Ref for Storing Results ---
+// This ref remains here, as the parent calculates and holds the results state
+const nutritionResults: Ref<NutritionDetails | null> = ref(null);
+
+// --- Static Data ---
 const genderOptions: Array<GenderDdl> = [
   { name: "Male", code: GenderType.Male },
   { name: "Female", code: GenderType.Female }
 ]
 
+// --- Computed Property for Button Disabled State ---
+const isCalculationDisabled = computed(() => {
+  return !age.value || gender.value === undefined || !weightKg.value || !heightCm.value || !activityFactor.value;
+});
+
+// --- Methods ---
 const handleCalculate = (): void => {
-  console.log("calcing");
+  const currentWeightKg = weightKg.value;
+  const currentHeightCm = heightCm.value;
+  const currentGender = gender.value;
+  const currentAge = age.value;
+  const currentActivityFactor = activityFactor.value;
+
+  if (currentWeightKg === undefined || currentHeightCm === undefined || currentGender === undefined || currentAge === undefined || currentActivityFactor === undefined) {
+    toast.add({ severity: 'error', summary: 'Missing Information', detail: 'Please fill in all required fields (Age, Gender, Weight, Height, Activity Factor).', life: 3000 });
+    nutritionResults.value = null; // Clear previous results
+    return;
+  }
+
   const nutritionService = new NutritionService(
-    weightKg.value!,    // weightKg
-    heightCm.value!,   // heightCm
-    gender.value!,// gender
-    age.value!,     // age
-    activityFactor.value!,
-    wristCm.value!,    // wristCm (currently unused in calculations)
-    stressFactor.value!,
+    currentWeightKg,
+    currentHeightCm,
+    currentGender,
+    currentAge,
+    currentActivityFactor,
+    wristCm.value,
+    stressFactor.value
   );
 
-  // const nutritionService = new NutritionService(
-  //   77,    // weightKg
-  //   183,   // heightCm
-  //   GenderType.Male,
-  //   28,
-  //   wristCm.value!,    // wristCm (currently unused in calculations)
-  // );
+  try {
+    const bmi = nutritionService.calculateBMI();
+    const ibw = nutritionService.calculateIBW();
+    const calculationWeightKg = nutritionService.calculateAdjustedBW();
+    //const bmr = nutritionService.calculateBMR();
+    const tee = nutritionService.calculateTEE();
+    const macros = nutritionService.calculateMacronutrientDistribution(tee);
+    const fluidRequirement = nutritionService.calculateFluidRequirement();
 
-  //const activityFactor = 1.55; // Moderate activity
+    // Update local state
+    nutritionResults.value = {
+      bmi: bmi,
+      ibw: ibw,
+      calculationWeightKg: calculationWeightKg,
+      tee: tee,
+      macronutrients: {
+        carbohydrates: macros.carbs,
+        protein: macros.protein,
+        fat: macros.fat
+      },
+      fluids: fluidRequirement
+    };
 
-  const bmi = nutritionService.calculateBMI();
-  const ibw = nutritionService.calculateIBW();
-  let adjBW = 0;
-  if (bmi > 30 || bmi > 40) {
-    adjBW = nutritionService.calculateAdjustedBW();
+  } catch (error) {
+      console.error("Calculation Error:", error);
+      nutritionResults.value = null;
+      toast.add({ severity: 'error', summary: 'Calculation Failed', detail: 'An unexpected error occurred.', life: 3000 });
   }
-  const bmr = nutritionService.calculateBMR();
-  const tee = nutritionService.calculateTEE();
-  const macros = nutritionService.calculateMacronutrientDistribution(tee);
-  const fluidRequirement = nutritionService.calculateFluidRequirement();
-
-  const eventData: NutritionDetails = {
-    bmi: bmi,
-    ibw: adjBW > 0 ? adjBW : ibw,
-    tee: tee,
-    macronutrients: {
-      carbohydrates: macros.carbs,
-      protein: macros.protein,
-      fat: macros.fat
-    },
-    fluids: fluidRequirement
-  };
-
-  emit('nutritionDetails', eventData)
-
-  console.log(JSON.stringify({
-    'Body Mass Index (BMI)': `${bmi} kg/m²`,
-    'Ideal Body Weight (kg)': `${ibw} kg`,
-    'Adjusted Body Weight (kg)': `${adjBW} kg`,
-    'Basal Metabolic Rate (BMR)': `${bmr} kcal/day`,
-    'Total Energy Expenditure (TEE)': `${tee} kcal/day (Activity Factor: ${activityFactor.value})`,
-    'Daily Macronutrients (grams)': {
-      'Carbohydrates (50% total)': `${macros.carbs.toFixed(0)} g`,
-      'Protein (20% total)': `${macros.protein.toFixed(0)} g`,
-      'Fat (30% total)': `${macros.fat.toFixed(0)} g`
-    },
-    'Daily Fluid Requirement': `${fluidRequirement.toFixed(0)} mL/day (${weightKg.value}kg × 30mL/kg)`
-  }));
 }
 </script>
 
 <template>
   <div>
-    <Card>
+    <Toast />
+
+    <!-- Input Card -->
+    <Card class="card-container">
       <template #title>
         <h3 class="title">
-          Nutritional Information
+          Nutritional Information Input
         </h3>
       </template>
       <template #content>
         <div class="flex-container">
-          <FloatLabel variant="on">
-            <InputNumber inputId="userAge" v-model="age" />
-            <label for="userAge">Age</label>
+          <!-- Input fields remain the same... -->
+          <FloatLabel>
+            <InputNumber inputId="userAge" v-model="age" :min="0" />
+            <label for="userAge">Age (Years)</label>
           </FloatLabel>
-
-          <FloatLabel variant="on">
-            <Select v-model="gender" inputId="userGender" :options="genderOptions" optionLabel="name"
-              class="gender-ddl" />
+          <FloatLabel>
+            <Select v-model="gender" inputId="userGender" :options="genderOptions" optionLabel="name" optionValue="code" class="w-full" />
             <label for="userGender">Gender</label>
           </FloatLabel>
-
-          <div class="inner-flex-container">
-            <div>
-              <FloatLabel variant="on">
-                <InputNumber inputId="userWeight" v-model="weightKg" />
-                <label for="userWeight">Weight</label>
-              </FloatLabel>
-            </div>
-          </div>
-
-          <FloatLabel variant="on">
-            <InputNumber inputId="userHeight" v-model="heightCm" />
-            <label for="userHeight">Height</label>
+          <FloatLabel>
+            <InputNumber inputId="userWeight" v-model="weightKg" :min="0" mode="decimal" :minFractionDigits="1" :maxFractionDigits="2" suffix=" kg"/>
+            <label for="userWeight">Weight (kg)</label>
           </FloatLabel>
-
-          <FloatLabel variant="on">
-            <InputNumber inputId="userWrist" v-model="wristCm" />
-            <label for="userWrist">Wrist size (optional)</label>
+          <FloatLabel>
+            <InputNumber inputId="userHeight" v-model="heightCm" :min="0" suffix=" cm"/>
+            <label for="userHeight">Height (cm)</label>
           </FloatLabel>
-
-          <FloatLabel variant="on">
-            <InputNumber inputId="userPal" v-model="pal" />
-            <label for="userPal">PAL</label>
+          <FloatLabel>
+            <InputNumber inputId="userWrist" v-model="wristCm" :min="0" mode="decimal" :minFractionDigits="1" :maxFractionDigits="1" suffix=" cm"/>
+            <label for="userWrist">Wrist Circumference (cm, Optional)</label>
           </FloatLabel>
-
-          <FloatLabel variant="on">
-            <InputNumber inputId="userSf" v-model="stressFactor" />
-            <label for="userSf">Stress factor (optional)</label>
+          <FloatLabel>
+            <InputNumber inputId="userActivityFactor" v-model="activityFactor" :min="1" mode="decimal" :minFractionDigits="1" :maxFractionDigits="2" />
+            <label for="userActivityFactor">Activity Factor (e.g., 1.2-1.9)</label>
           </FloatLabel>
-
-          <Button label="Calculate" class="calculate-button" raised @click="handleCalculate" />
+          <FloatLabel>
+            <InputNumber inputId="userStressFactor" v-model="stressFactor" :min="0" mode="decimal" :minFractionDigits="1" :maxFractionDigits="2" />
+            <label for="userStressFactor">Stress Factor (Optional, e.g., 1.0-1.5)</label>
+          </FloatLabel>
+          <Button label="Calculate" class="calculate-button" icon="pi pi-calculator" raised @click="handleCalculate" :disabled="isCalculationDisabled" />
         </div>
       </template>
     </Card>
+
+    <ResultsPanel :results="nutritionResults" />
   </div>
 </template>
 
 <style scoped>
+/* Styles specific to the form Card/Container */
+.card-container {
+  margin-bottom: 2rem;
+  border-radius: 6px;
+  border: 1px solid var(--p-content-border-color);
+}
+
 .title {
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
+  text-align: center;
 }
 
 .flex-container {
   display: flex;
   flex-direction: column;
-  gap: 15px;
+  gap: 24px;
+  max-width: 400px;
+  margin: 0 auto;
 }
 
-.inner-flex-container {
-  display: flex;
-  gap: 10px;
-}
-
-.gender-ddl {
-  width: 20%;
+.p-inputnumber, .p-select {
+    width: 100%;
 }
 
 .calculate-button {
-  margin-top: .5rem;
-  width: 25%;
+  margin-top: 1rem;
+  width: 100%;
 }
+
+.p-floatlabel {
+  margin-top: 1rem;
+}
+
+.mb-4 { margin-bottom: 1rem; }
+
+/* Styles related to the results grid/panel were MOVED to ResultsPanel.vue */
 </style>

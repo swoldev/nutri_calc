@@ -6,6 +6,7 @@ export enum GenderType {
 export interface NutritionDetails {
   bmi: number
   ibw: number
+  calculationWeightKg: number
   tee: number
   macronutrients: MacronutrientDetails
   fluids: number
